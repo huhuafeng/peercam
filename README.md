@@ -26,8 +26,8 @@
 
 ### 方式一：下载 APK
 
-1. 打开 GitHub Releases 页（tag v1.0.0 及以后会自动生成）
-2. 下载 `app-release.apk` 或 `app-debug.apk`
+1. 打开 [GitHub Releases](https://github.com/huhuafeng/peercam/releases) 页（tag v1.0.0 及以上）
+2. 下载 `app-debug.apk`（**已签名，可直接安装**）
 3. 安装（需允许"安装未知来源应用"）
 
 ### 方式二：自行构建
@@ -80,6 +80,7 @@
 - 相机在 App 前台/熄屏时由系统管理（Android 后台相机限制）
 - 苹果 iOS 版本不在本仓库支持范围（需另用 iOS 原生方案）
 - 部分公共 Wi-Fi（AP 隔离）无法发现对方，建议用热点方案
+- Release 附带的 `app-debug.apk` 为 debug 签名（可安装）；`app-release-unsigned.apk` 仅作存档（需自行签名）
 
 ## License
 
