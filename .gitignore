@@ -13,3 +13,4 @@ app/build/
 .toolchain/
 .ghcache/
 dist/
+.apkcheck/
