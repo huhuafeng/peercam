@@ -91,6 +91,19 @@ class MainActivity : AppCompatActivity(), PeerState.Listener {
             }
 
         refreshMyIp()
+        // App 启动即拉起前台服务：提前开 UDP 监听，对方一连接就能互通
+        ensureServiceStarted()
+    }
+
+    /** App 启动即拉起前台服务（提前开 UDP 监听，等对方连接）。 */
+    private fun ensureServiceStarted() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ContextCompat.startForegroundService(
+                this, Intent(this, PeerService::class.java)
+            )
+        } else {
+            startService(Intent(this, PeerService::class.java))
+        }
     }
 
     private fun refreshMyIp() {

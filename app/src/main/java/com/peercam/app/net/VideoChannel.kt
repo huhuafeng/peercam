@@ -139,8 +139,8 @@ class VideoChannel(private val logTag: String = "PeerCam/Ch") {
      *  - 控制消息 (type, text)
      */
     fun receiveLoop(
-        onConfig: (width: Int, height: Int, csd: ByteArray) -> Unit,
-        onFrame: (frameId: Long, data: ByteArray, isKeyFrame: Boolean, ts: Long) -> Unit,
+        onConfig: (width: Int, height: Int, csd: ByteArray, fromIp: String) -> Unit,
+        onFrame: (frameId: Long, data: ByteArray, isKeyFrame: Boolean, ts: Long, fromIp: String) -> Unit,
         onControl: (type: Int, fromIp: String, text: String) -> Unit
     ) {
         val s = socket ?: return
@@ -168,14 +168,14 @@ class VideoChannel(private val logTag: String = "PeerCam/Ch") {
                                         ((pay[6].toInt() and 0xFF) shl 8) or
                                         (pay[7].toInt() and 0xFF)
                                     val csd = pay.copyOfRange(8, pay.size)
-                                    onConfig(w, hgt, csd)
+                                    onConfig(w, hgt, csd, from)
                                 }
                             }
                         } else {
                             val isKey = h.flags and Protocol.FLAG_KEYFRAME != 0
                             val frame = reassemble(h, data)
                             if (frame != null) {
-                                onFrame(h.frameId, frame, isKey, h.timestampMs)
+                                onFrame(h.frameId, frame, isKey, h.timestampMs, from)
                             }
                         }
                     }

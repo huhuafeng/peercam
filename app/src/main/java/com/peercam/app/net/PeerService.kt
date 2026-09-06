@@ -26,8 +26,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 数据通路（本端 → 对端）：
  *   Camera2 → Encoder(输入 Surface) → Annex-B → VideoChannel.sendFrame → UDP 1200B 分片 → 对端重组 → Decoder → Surface
  *
- * 关键设计：Service 创建即打开 UDP 接收端口并开始 receiveLoop（被动接收），
- * 点击"连接"只启动发送侧（相机+编码+定向）——这样一端主动连、另一端无需任何操作即可看到画面。
+ * 双向对称连接模型：
+ *  - Service 创建即开 UDP 端口 + 起接收循环（被动接收）
+ *  - 收到对方任何包（视频帧/CONN/PING）→ 自动启动本端推流（相机+编码）并定向对方 IP
+ *  - 点"连接"则主动发 CONN 触发对方也推流 → 双方无需都点连接，一端点即可互通
  */
 class PeerService : Service() {
     private val log = "PeerService"
@@ -113,7 +115,7 @@ class PeerService : Service() {
         openChannelAndListen()
     }
 
-    /** 打开 UDP 端口并启动接收循环（只做被动接收，不启动相机/编码）。 */
+    /** 打开 UDP 端口并启动接收循环（被动接收 + 收到对方包自动启动推流）。 */
     private fun openChannelAndListen() {
         if (channel != null) return
         try {
@@ -123,24 +125,37 @@ class PeerService : Service() {
             val chRef = ch
             rxThread = Thread({
                 chRef.receiveLoop(
-                    onConfig = { w, h, csd ->
+                    onConfig = { w, h, csd, fromIp ->
                         handler?.post {
                             pendingCsd = Triple(w, h, csd)
+                            // 收到对方 CSD 说明对方已推流 → 确保本端也推流（对称）
+                            startStreamingIfNeeded(from = fromIp)
                             decoder?.configure(w, h, csd)
                         }
                     },
-                    onFrame = { _, data, isKey, _ ->
+                    onFrame = { _, data, isKey, _, fromIp ->
                         lastRxAt = System.currentTimeMillis()
-                        handler?.post { decoder?.feed(data, isKey) }
+                        handler?.post {
+                            // 对方在推流 → 自动启动本端推流（对称）
+                            startStreamingIfNeeded(from = fromIp)
+                            decoder?.feed(data, isKey)
+                        }
                     },
                     onControl = { type, from, _ ->
                         when (type) {
-                            // 对方请求配置：重发 CSD + 关键帧
+                            // 对方请求我们推流 / 已上线 → 启动本端推流并应答
                             Protocol.TYPE_CONN -> {
                                 handler?.post {
-                                    if (from.isNotEmpty()) channel?.setRemote(from)
-                                    encoder?.resendConfig()
-                                    encoder?.requestKeyFrame()
+                                    startStreamingIfNeeded(from = from)
+                                    // 应答（告知对方：我也在推流）
+                                    chRef.sendControl(from, Protocol.TYPE_CONN)
+                                }
+                            }
+                            Protocol.TYPE_PING -> {
+                                handler?.post {
+                                    // 收到心跳 → 应答 PONG，同时确保推流
+                                    startStreamingIfNeeded(from = from)
+                                    chRef.sendControl(from, Protocol.TYPE_PONG)
                                 }
                             }
                         }
@@ -152,22 +167,33 @@ class PeerService : Service() {
         }
     }
 
-    /** 启动完整会话（发送侧：相机 + 编码 + 定向对端）。 */
-    private fun startAll(ip: String) {
-        if (isConnected.get() || isStopping.get()) return
-        remoteIp = ip
-        isConnected.set(true)
-        lastRxAt = System.currentTimeMillis()
-        Log.i(log, "startAll -> $ip")
-        PeerState.notifyStatus("连接中 $ip…", true)
-
-        // 通道必须已打开（onCreate 已保证）；设置目标
-        val ch = channel
-        if (ch == null) {
-            PeerState.notifyStatus("网络通道初始化失败", false)
+    /**
+     * 确保本端推流已启动（相机 + 编码 + 定向 [from]）。
+     * 若对端来源已知则设置远端 IP；若已启动则仅更新远端 IP。
+     * 节流：仅当远端 IP 变化时才重发 CSD（避免每帧触发对端解码器重建）。
+     */
+    private fun startStreamingIfNeeded(from: String?) {
+        if (isStopping.get()) return
+        val ch = channel ?: return
+        val ipChanged = !from.isNullOrBlank() && remoteIp != from
+        if (ipChanged && !from.isNullOrBlank()) {
+            remoteIp = from
+            ch.setRemote(from)
+        }
+        val already = isConnected.get()
+        if (already) {
+            if (ipChanged) {
+                // 对端换成新地址（新连接）：重发 CSD + 关键帧
+                encoder?.resendConfig()
+                encoder?.requestKeyFrame()
+            }
             return
         }
-        ch.setRemote(ip)
+        // 启动完整会话（发送侧）
+        isConnected.set(true)
+        lastRxAt = System.currentTimeMillis()
+        Log.i(log, "startStreaming (auto) -> $remoteIp")
+        PeerState.notifyStatus("已连接 $remoteIp，正在互看…", true)
 
         // ---- 编码器 ----
         val enc = Encoder(
@@ -195,7 +221,7 @@ class PeerService : Service() {
         // ---- 相机 → 编码器 ----
         val cam = CameraSource(this) { ok ->
             PeerState.notifyCamera(ok)
-            if (ok) PeerState.notifyStatus("相机就绪，等待对方画面", true)
+            if (ok) PeerState.notifyStatus("已连接 $remoteIp，正在互看…", true)
             else PeerState.notifyStatus("相机不可用", false)
         }
         this.cameraSource = cam
@@ -205,7 +231,41 @@ class PeerService : Service() {
         } else {
             PeerState.notifyStatus("编码器初始化失败", false)
         }
-        notifyText(getString(R.string.notify_text, ip))
+        notifyText(getString(R.string.notify_text, remoteIp))
+        // 通知对方我们也已上线
+        if (remoteIp.isNotEmpty()) ch.sendControl(remoteIp, Protocol.TYPE_CONN)
+
+        // 心跳：每 2s 发 PING（探测对方在线；对方收到 PING 也会启动推流 = 双保险）
+        val h = handler
+        if (h != null) {
+            val hb = object : Runnable {
+                override fun run() {
+                    if (isConnected.get() && !isStopping.get()) {
+                        val ipNow = remoteIp
+                        if (ipNow.isNotEmpty()) ch.sendPing()
+                        h.postDelayed(this, 2_000)
+                    }
+                }
+            }
+            h.postDelayed(hb, 2_000)
+        }
+    }
+
+    /** 点击"连接"主动发起：设置定向 + 通知对方推流。 */
+    private fun startAll(ip: String) {
+        if (isStopping.get()) return
+        val ch = channel ?: return
+        if (isConnected.get() && remoteIp == ip) {
+            // 已连接同一端：重发请求
+            ch.sendControl(ip, Protocol.TYPE_CONN)
+            return
+        }
+        remoteIp = ip
+        ch.setRemote(ip)
+        PeerState.notifyStatus("连接中 $ip…", true)
+        // 先启动本端推流再通知对方
+        startStreamingIfNeeded(from = ip)
+        ch.sendControl(ip, Protocol.TYPE_CONN)
     }
 
     /** 对端画面输出 Surface 变化（重建解码器）。 */
