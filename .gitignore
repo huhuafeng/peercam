@@ -11,3 +11,4 @@ app/build/
 
 # local build toolchain (downloads)
 .toolchain/
+.ghcache/
