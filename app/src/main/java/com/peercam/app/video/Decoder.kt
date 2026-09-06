@@ -40,8 +40,8 @@ class Decoder(private val surface: Surface) {
                     MediaFormat.MIMETYPE_VIDEO_AVC, widthParam, heightParam
                 )
                 format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 1024 * 1024)
-                format.setByteBuffer(MediaFormat.KEY_CSD_0, ByteBuffer.wrap(nalu[0]))
-                format.setByteBuffer(MediaFormat.KEY_CSD_1, ByteBuffer.wrap(nalu[1]))
+                format.setByteBuffer("csd-0", ByteBuffer.wrap(nalu[0]))
+                format.setByteBuffer("csd-1", ByteBuffer.wrap(nalu[1]))
 
                 val c = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
                 c.configure(format, surface, null, 0)

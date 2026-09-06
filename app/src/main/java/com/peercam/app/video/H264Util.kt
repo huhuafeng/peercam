@@ -66,8 +66,8 @@ object H264Util {
 
     /** 从 MediaFormat 取 csd-0/csd-1（SPS/PPS），拼成 Annex-B config。 */
     fun formatCsdToAnnexB(format: MediaFormat): ByteArray? {
-        val sps = csdBuffer(format, MediaFormat.KEY_CSD_0) ?: return null
-        val pps = csdBuffer(format, MediaFormat.KEY_CSD_1) ?: return null
+        val sps = csdBuffer(format, "csd-0") ?: return null
+        val pps = csdBuffer(format, "csd-1") ?: return null
         val out = java.io.ByteArrayOutputStream()
         out.write(byteArrayOf(0, 0, 0, 1)); out.write(sps)
         out.write(byteArrayOf(0, 0, 0, 1)); out.write(pps)
@@ -91,8 +91,8 @@ object H264Util {
         if (nalu.size < 2) return null
         return try {
             val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, 1, 1)
-            format.setByteBuffer(MediaFormat.KEY_CSD_0, ByteBuffer.wrap(nalu[0]))
-            format.setByteBuffer(MediaFormat.KEY_CSD_1, ByteBuffer.wrap(nalu[1]))
+            format.setByteBuffer("csd-0", ByteBuffer.wrap(nalu[0]))
+            format.setByteBuffer("csd-1", ByteBuffer.wrap(nalu[1]))
             val w = format.getInteger(MediaFormat.KEY_WIDTH)
             val h = format.getInteger(MediaFormat.KEY_HEIGHT)
             Triple(w, h, csdAnnexB.copyOf())

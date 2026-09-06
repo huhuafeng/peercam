@@ -20,7 +20,8 @@ class Discovery(
     private val deviceName: String = Build.MODEL ?: "Android",
     private val onPeer: (ip: String, name: String) -> Unit
 ) {
-    private volatile var running = false
+    @Volatile
+    private var running = false
     private var socket: DatagramSocket? = null
     private var lock: WifiManager.MulticastLock? = null
     private var thread: Thread? = null

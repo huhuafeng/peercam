@@ -136,7 +136,7 @@ class CameraSource(
 
             val surfaces = if (prevSurf != null) listOf(encSurf, prevSurf) else listOf(encSurf)
 
-            val req = CaptureRequest.Builder(CameraDevice.TEMPLATE_PREVIEW).apply {
+            val req = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(encSurf)
                 prevSurf?.let { addTarget(it) }
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
