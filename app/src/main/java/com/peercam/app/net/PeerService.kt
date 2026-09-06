@@ -156,6 +156,13 @@ class PeerService : Service() {
                             startStreamingIfNeeded(from = fromIp)
                             ensureDecoder()
                             decoder?.feed(data, isKey)
+                            // 诊断：把渲染计数反映到 UI
+                            val dec = decoder
+                            if (dec != null) {
+                                PeerState.notifyStatus(
+                                    "互看中 $remoteIp | 发 $txFrameCount 收 $rxFrameCount | 解码输出 ${dec.renderedFrames}", true
+                                )
+                            }
                         }
                     },
                     onControl = { type, from, _ ->

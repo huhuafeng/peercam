@@ -79,6 +79,12 @@ class MainActivity : AppCompatActivity(), PeerState.Listener {
                 override fun onSurfaceTextureDestroyed(
                     st: android.graphics.SurfaceTexture
                 ): Boolean {
+                    // 通知 Service：Surface 即将销毁，清掉解码器（避免渲染到已失效 Surface）
+                    PeerService.pendingSurface = null
+                    startService(
+                        Intent(this@MainActivity, PeerService::class.java)
+                            .setAction(PeerService.ACTION_ATTACH_SURFACE)
+                    )
                     remoteSurface?.release()
                     remoteSurface = null
                     return true
