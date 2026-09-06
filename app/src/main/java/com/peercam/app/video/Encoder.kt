@@ -133,10 +133,8 @@ class Encoder(
     /** 重发参数集给对端（解决解码器重建后无 CSD 导致黑屏）。 */
     fun resendConfig() {
         val c = latestCsd ?: return
-        val parsed = H264Util.parseCsd(c)
-        val w = parsed?.first ?: width
-        val h = parsed?.second ?: height
-        try { onConfig(w, h, c) } catch (_: Exception) {}
+        val parsed = H264Util.parseCsd(c) ?: return
+        try { onConfig(parsed.first, parsed.second, c) } catch (_: Exception) {}
     }
 
     fun requestKeyFrame() {
