@@ -70,19 +70,20 @@ class Encoder(
                         codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo
                     ) {
                         try {
+                            // 标准方式：getOutputBuffer 返回的 buffer position/limit 指向本帧数据
                             val outBuf = codec.getOutputBuffer(index) ?: return
                             val isKey = (info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
                             val isCfg = (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
 
-                            outBuf.position(info.offset)
-                            outBuf.limit(info.offset + info.size)
-                            val arr = ByteArray(info.size)
+                            // 读取本帧数据（buffer.remaining() 即 info.size，无需手动 position/limit）
+                            val arr = ByteArray(outBuf.remaining())
                             outBuf.get(arr)
 
                             if (isCfg && arr.size > 0) {
                                 val csd = H264Util.avccToAnnexB(arr)
                                 latestCsd = csd
                                 onConfig(csd)
+                                Log.i(log, "encoder config sent (${csd.size}B)")
                             } else if (info.size > 0) {
                                 val annexB =
                                     if (H264Util.isAnnexB(arr)) arr else H264Util.avccToAnnexB(arr)

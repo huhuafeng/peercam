@@ -13,6 +13,7 @@ import android.os.HandlerThread
 import android.util.Log
 import android.util.Size
 import android.view.Surface
+import kotlin.math.abs
 
 /**
  * 相机采集（Camera2）：相机帧 → 编码器 Surface + 本地预览 Surface（可空）。
@@ -129,17 +130,20 @@ class CameraSource(
             return
         }
         try {
-            // 计算合适分辨率（≤1280 中最接近 1280x720 的）
+            // 计算合适分辨率：用编码器 Surface 支持列表（Surface 而非 SurfaceTexture 的尺寸才是编码器可靠兼容的）
             val ch = manager?.getCameraCharacteristics(camera.id)
-            var size = Size(1280, 720)
+            var size = Size(640, 480)
             try {
                 val map: StreamConfigurationMap? =
                     ch?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                 if (map != null) {
-                    val sizes = map.getOutputSizes(android.graphics.SurfaceTexture::class.java)
+                    // 优先编码器 Surface 支持的分辨率（Surface::class.java 返回编码器可用的尺寸）
+                    val sizes = map.getOutputSizes(android.view.Surface::class.java)
                     if (sizes.isNotEmpty()) {
-                        size = sizes.filter { it.width <= 1280 }
-                            .maxByOrNull { it.width * it.height }
+                        // 选 ≤1280x720 中最接近编码器 640x480 的（保证 encoder surface 能匹配）
+                        size = sizes.filter { it.width <= 1280 && it.height <= 720 }
+                            .minByOrNull { abs(it.width * it.height - 640 * 480) }
+                            ?: sizes.filter { it.width <= 1280 }.maxByOrNull { it.width * it.height }
                             ?: sizes.maxByOrNull { it.width * it.height }!!
                     }
                 }

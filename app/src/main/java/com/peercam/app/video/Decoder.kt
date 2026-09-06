@@ -51,36 +51,50 @@ class Decoder(private val surface: Surface) {
                 width = widthParam
                 height = heightParam
                 running = true
-                Log.i(log, "decoder configured ${widthParam}x$heightParam")
+                Log.i(log, "decoder configured ${widthParam}x$heightParam (csd=${csd.size}B)")
+                // 通知 UI 解码器就绪
+                onReady?.invoke(true)
             } catch (e: Exception) {
                 Log.e(log, "configure failed: ${e.message}", e)
+                onReady?.invoke(false)
                 releaseLocked()
             }
         }
     }
 
+    /** 解码器状态回调（外部可注入，用于诊断）。 */
+    var onReady: ((Boolean) -> Unit)? = null
+
     /** 送入一帧（Annex-B 带 start code）。 */
     fun feed(data: ByteArray, isKeyFrame: Boolean) {
         val c = codec ?: return
         try {
-            val inIdx = c.dequeueInputBuffer(10_000)
+            // 等待可用输入 buffer（最长 100ms，避免直接丢帧）
+            val inIdx = c.dequeueInputBuffer(100_000)
             if (inIdx >= 0) {
                 val buf = c.getInputBuffer(inIdx) ?: return
                 buf.clear()
+                if (buf.remaining() < data.size) {
+                    // buffer 太小：解码器配了 1MB MAX_INPUT_SIZE，一般不会；兜底直接丢
+                    Log.w(log, "input buffer too small: ${buf.remaining()} < ${data.size}")
+                    return
+                }
                 buf.put(data)
                 c.queueInputBuffer(
                     inIdx,
                     0,
                     data.size,
                     System.currentTimeMillis() * 1000,
-                    if (isKeyFrame) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                    0 // 不手动设 KEY_FRAME flag（交给解码器识别 start code）
                 )
             }
+            // 释放输出（渲染到 surface）
             val info = MediaCodec.BufferInfo()
             while (true) {
                 val oIdx = c.dequeueOutputBuffer(info, 0)
                 when {
                     oIdx >= 0 -> {
+                        // 渲染 output buffer 到 Surface
                         c.releaseOutputBuffer(oIdx, true)
                         continue
                     }

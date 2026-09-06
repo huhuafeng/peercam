@@ -46,6 +46,12 @@ class PeerService : Service() {
     private var lastRxAt = 0L
     private var pendingCsd: Triple<Int, Int, ByteArray>? = null
     private var viewSurface: Surface? = null // UI 最近一次 attach 的 Surface
+
+    // 诊断统计
+    private var rxFrameCount = 0L
+    private var txFrameCount = 0L
+    private var rxConfigCount = 0L
+    private var statusUpdater: Runnable? = null
     private val isConnected = AtomicBoolean(false)
     private val isStopping = AtomicBoolean(false)
 
@@ -127,17 +133,24 @@ class PeerService : Service() {
                 chRef.receiveLoop(
                     onConfig = { w, h, csd, fromIp ->
                         handler?.post {
+                            rxConfigCount++
                             pendingCsd = Triple(w, h, csd)
+                            Log.i(log, "RX config ${w}x$h csd=${csd.size}B (count=$rxConfigCount)")
                             // 收到对方 CSD 说明对方已推流 → 确保本端也推流（对称）
                             startStreamingIfNeeded(from = fromIp)
+                            // 解码器可能还没创建（surface attach 时序问题）：用 viewSurface 延迟创建
+                            ensureDecoder()
                             decoder?.configure(w, h, csd)
                         }
                     },
                     onFrame = { _, data, isKey, _, fromIp ->
                         lastRxAt = System.currentTimeMillis()
                         handler?.post {
+                            rxFrameCount++
+                            if (rxFrameCount % 30 == 0L) Log.i(log, "RX frames=$rxFrameCount")
                             // 对方在推流 → 自动启动本端推流（对称）
                             startStreamingIfNeeded(from = fromIp)
+                            ensureDecoder()
                             decoder?.feed(data, isKey)
                         }
                     },
@@ -204,6 +217,8 @@ class PeerService : Service() {
                 val c = this.channel
                 if (c != null) {
                     frameCounter++
+                    txFrameCount++
+                    if (txFrameCount % 30 == 0L) Log.i(log, "TX frames=$txFrameCount")
                     c.sendFrame(frameCounter, data, isKey, ts)
                 }
             }
@@ -211,12 +226,7 @@ class PeerService : Service() {
         enc.start(640, 480, 1_200_000, 15)
         this.encoder = enc
 
-        // 重建解码器（重连场景：viewSurface 仍在但 decoder 已被 teardown 清空）
-        val vs = viewSurface
-        if (decoder == null && vs != null) {
-            decoder = Decoder(vs)
-            pendingCsd?.let { (w, h, csd) -> decoder?.configure(w, h, csd) }
-        }
+        // 编码器设置完成，不再在此重建解码器（由 ensureDecoder/attachSurface 负责）
 
         // ---- 相机 → 编码器 ----
         val cam = CameraSource(this) { ok ->
@@ -234,6 +244,23 @@ class PeerService : Service() {
         notifyText(getString(R.string.notify_text, remoteIp))
         // 通知对方我们也已上线
         if (remoteIp.isNotEmpty()) ch.sendControl(remoteIp, Protocol.TYPE_CONN)
+
+        // 状态刷新：每 1s 显示 TX/RX 统计（诊断用）
+        val h = handler
+        if (h != null) {
+            val su = object : Runnable {
+                override fun run() {
+                    if (isConnected.get() && !isStopping.get()) {
+                        PeerState.notifyStatus(
+                            "互看中 $remoteIp | 发送 ${txFrameCount} 帧 接收 ${rxFrameCount} 帧", true
+                        )
+                        h.postDelayed(this, 1_000)
+                    }
+                }
+            }
+            statusUpdater = su
+            h.postDelayed(su, 1_000)
+        }
 
         // 心跳：每 2s 发 PING（探测对方在线；对方收到 PING 也会启动推流 = 双保险）
         val h = handler
@@ -266,6 +293,24 @@ class PeerService : Service() {
         // 先启动本端推流再通知对方
         startStreamingIfNeeded(from = ip)
         ch.sendControl(ip, Protocol.TYPE_CONN)
+    }
+
+    /**
+     * 确保解码器已创建（用最近一次 attach 的 viewSurface）。
+     * 解决 surface attach 与视频包到达的时序竞争问题：
+     * 视频包先到而 surface 未 attach 时，推迟到 attach 后也补建。
+     */
+    private fun ensureDecoder() {
+        if (decoder == null && viewSurface != null) {
+            decoder = Decoder(viewSurface!!).apply {
+                onReady = { ok ->
+                    PeerState.notifyStatus(
+                        if (ok) "解码器就绪，等待画面…" else "解码器初始化失败", isConnected.get()
+                    )
+                }
+            }
+            pendingCsd?.let { (w, h, csd) -> decoder?.configure(w, h, csd) }
+        }
     }
 
     /** 对端画面输出 Surface 变化（重建解码器）。 */
