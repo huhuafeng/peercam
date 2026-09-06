@@ -246,35 +246,35 @@ class PeerService : Service() {
         if (remoteIp.isNotEmpty()) ch.sendControl(remoteIp, Protocol.TYPE_CONN)
 
         // 状态刷新：每 1s 显示 TX/RX 统计（诊断用）
-        val h = handler
-        if (h != null) {
+        val h1 = handler
+        if (h1 != null) {
             val su = object : Runnable {
                 override fun run() {
                     if (isConnected.get() && !isStopping.get()) {
                         PeerState.notifyStatus(
                             "互看中 $remoteIp | 发送 ${txFrameCount} 帧 接收 ${rxFrameCount} 帧", true
                         )
-                        h.postDelayed(this, 1_000)
+                        h1.postDelayed(this, 1_000)
                     }
                 }
             }
             statusUpdater = su
-            h.postDelayed(su, 1_000)
+            h1.postDelayed(su, 1_000)
         }
 
         // 心跳：每 2s 发 PING（探测对方在线；对方收到 PING 也会启动推流 = 双保险）
-        val h = handler
-        if (h != null) {
+        val h2 = handler
+        if (h2 != null) {
             val hb = object : Runnable {
                 override fun run() {
                     if (isConnected.get() && !isStopping.get()) {
                         val ipNow = remoteIp
                         if (ipNow.isNotEmpty()) ch.sendPing()
-                        h.postDelayed(this, 2_000)
+                        h2.postDelayed(this, 2_000)
                     }
                 }
             }
-            h.postDelayed(hb, 2_000)
+            h2.postDelayed(hb, 2_000)
         }
     }
 
