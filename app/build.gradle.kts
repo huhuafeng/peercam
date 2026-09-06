@@ -5,10 +5,15 @@ plugins {
 
 /**
  * 版本号自动推导：
- *  - versionName：取 git 最近 tag（如 v1.2.3 → "1.2.3"），本地无 git/tag 时回退 "1.0.0"
+ *  - versionName：优先取 GitHub Actions 环境变量 GITHUB_REF_NAME（如 v1.2.3 → "1.2.3"）；
+ *    其次 git describe（本地开发）；都没有回退 "1.0.0"
  *  - versionCode：tag 三段数字转数字（v1.2.3 → 10203），保证每次发版可覆盖安装
  */
 fun resolveVersionName(): String {
+    // GitHub Actions: refs/tags/v1.2.3 → GITHUB_REF_NAME = "v1.2.3"
+    val refName = System.getenv("GITHUB_REF_NAME") ?: ""
+    if (refName.startsWith("v")) return refName.removePrefix("v")
+    // 本地：git describe（需 tag 在本地，如打 tag 后本地构建）
     val tag = try {
         val p = ProcessBuilder("git", "describe", "--tags", "--abbrev=0")
             .redirectErrorStream(true).start()
