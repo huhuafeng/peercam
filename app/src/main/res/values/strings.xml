@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name">PeerCam</string>
+    <string name="app_name_long">PeerCam 局域网互看</string>
+    <string name="title_connecting">正在连接…</string>
+    <string name="btn_discover">搜索局域网设备</string>
+    <string name="btn_start">启动互看</string>
+    <string name="btn_stop">停止</string>
+    <string name="btn_swap">切换画面</string>
+    <string name="hint_manual_ip">手动输入对方 IP，如 192.168.1.23</string>
+    <string name="label_my_ip">本机 IP</string>
+    <string name="label_remote">对方画面</string>
+    <string name="label_local">本机画面</string>
+    <string name="status_not_connected">未连接</string>
+    <string name="status_connected">已连接</string>
+    <string name="status_streaming">传输中</string>
+    <string name="status_waiting">等待对方接入…</string>
+    <string name="permission_camera_denied">需要相机权限才能互看</string>
+    <string name="permission_network_denied">需要附近 WLAN 权限（Android 13+）</string>
+    <string name="device_found">发现设备: %1$s</string>
+    <string name="notify_channel_name">互看服务</string>
+    <string name="notify_channel_desc">保持局域网互看服务运行</string>
+    <string name="notify_title">PeerCam 运行中</string>
+    <string name="notify_text">正在与 %1$s 互看</string>
+</resources>

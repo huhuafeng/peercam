@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.PeerCam" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/pc_accent</item>
+        <item name="colorOnPrimary">@color/pc_black</item>
+        <item name="android:statusBarColor">@color/pc_darker</item>
+        <item name="android:navigationBarColor">@color/pc_darker</item>
+        <item name="android:windowBackground">@color/pc_darker</item>
+    </style>
+</resources>

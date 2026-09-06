@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="pc_black">#FF000000</color>
+    <color name="pc_dark">#FF101418</color>
+    <color name="pc_darker">#FF0A0D10</color>
+    <color name="pc_accent">#FF00C2A8</color>
+    <color name="pc_accent_dim">#FF00C2A8</color>
+    <color name="pc_text">#FFFFFFFF</color>
+    <color name="pc_text_dim">#FF9AA4AC</color>
+    <color name="pc_panel">#CC1A2026</color>
+</resources>
