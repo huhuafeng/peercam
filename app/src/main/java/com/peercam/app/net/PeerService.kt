@@ -283,6 +283,8 @@ class PeerService : Service() {
                     if (isConnected.get() && !isStopping.get()) {
                         val ipNow = remoteIp
                         if (ipNow.isNotEmpty()) ch.sendPing()
+                        // 周期性强制关键帧：UDP 丢包后对端需要 IDR 才能恢复解码（关键！）
+                        encoder?.requestKeyFrame()
                         h2.postDelayed(this, 2_000)
                     }
                 }

@@ -19,24 +19,24 @@ object H264Util {
         return (b0 == 0 && b1 == 0 && b2 == 0 && b3 == 1) || (b0 == 0 && b1 == 0 && b2 == 1)
     }
 
-    /** 把 AVCC（4 字节长度前缀）转成 Annex-B（00 00 00 01）。兼容宽松：先严格判断，再回退。 */
+    /**
+     * 把 AVCC（4 字节长度前缀）转成 Annex-B（00 00 00 01）。
+     * 关键顺序：先尝试严格 AVCC 完整解析（成功=是 AVCC，保险转换）；
+     * 只有严格解析失败才判断是否真是 Annex-B（有 start code 则原样返回）。
+     * 修复：旧逻辑先判断 Annex-B 会把「NAL 长度在 0x00000100~0x000001FF（256-511B）
+     * 的 AVCC 数据」误判为 Annex-B → 原样发送 → 对端解码失败。
+     */
     fun avccToAnnexB(data: ByteArray, start: Int = 0, len: Int = -1): ByteArray {
         val end = if (len < 0) data.size else start + len
         if (end <= start) return ByteArray(0)
-        // 先看是否真的是 Annex-B：以 00 00 01 开头且第 4 字节是合法 NAL 类型（1-31）
-        if (data.size > start + 3) {
-            val b0 = data[start].toInt() and 0xFF
-            val b1 = data[start + 1].toInt() and 0xFF
-            val b2 = data[start + 2].toInt() and 0xFF
-            val b3 = data[start + 3].toInt() and 0xFF
-            val nalType = b3 and 0x1F
-            val isAnnexB = (b0 == 0 && b1 == 0 && b2 == 1) || (b0 == 0 && b1 == 0 && b2 == 0 && b3 == 1)
-            if (isAnnexB && nalType in 1..31) {
-                return data.copyOfRange(start, end)
-            }
+        // 1) 优先严格 AVCC 解析（完整解析到底才算成功）
+        avccToAnnexBStrict(data, start, len)?.let { return it }
+        // 2) 严格解析失败：若确实以 start code 开头（真 Annex-B）则原样返回
+        if (isAnnexB(data, start)) {
+            return data.copyOfRange(start, end)
         }
-        // 严格 AVCC→Annex-B；失败则原样返回（宁可保留原始数据也不要用错格式）
-        return avccToAnnexBStrict(data, start, len) ?: data.copyOfRange(start, end)
+        // 3) 保底：原样返回（宁可给原始数据，不要格式错乱）
+        return data.copyOfRange(start, end)
     }
 
     /**

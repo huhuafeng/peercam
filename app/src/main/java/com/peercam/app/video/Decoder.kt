@@ -24,6 +24,8 @@ class Decoder(private val surface: Surface) {
 
     // 诊断：pts 计数（递增，避免相同 pts 被设备丢帧）
     private var ptsUs = 0L
+    // 当前使用的 CSD（内容比较，避免重复配置触发重建）
+    private var currentCsd: ByteArray? = null
     // 诊断：已渲染帧数（供 UI 显示，区分"解码器没输出"vs"没渲染"）
     @Volatile
     var renderedFrames = 0L
@@ -40,6 +42,11 @@ class Decoder(private val surface: Surface) {
      */
     fun configure(widthParam: Int, heightParam: Int, csd: ByteArray) {
         synchronized(lock) {
+            // 仅当 csd 真正变化才重建（避免 UDP 重复/乱序的 config 包导致解码器反复重建 → 恒无输出）
+            val cur = currentCsd
+            if (codec != null && cur != null && cur.contentEquals(csd)) {
+                return
+            }
             // 不短路：总是重建（编码器重启/参数变化需要新 CSD）
             releaseLocked()
             try {
@@ -65,6 +72,7 @@ class Decoder(private val surface: Surface) {
                 ptsUs = 0L
                 renderedFrames = 0L
                 fedFrames = 0L
+                currentCsd = csd.copyOf()
                 Log.i(log, "decoder configured ${widthParam}x$heightParam (csd=${csd.size}B)")
                 onReady?.invoke(true)
             } catch (e: Exception) {
@@ -133,6 +141,7 @@ class Decoder(private val surface: Surface) {
         codec = null
         running = false
         width = 0; height = 0
+        currentCsd = null
     }
 
     fun stop() {

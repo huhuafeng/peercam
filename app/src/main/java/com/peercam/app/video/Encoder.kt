@@ -47,7 +47,8 @@ class Encoder(
                     setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
                     setInteger(MediaFormat.KEY_FRAME_RATE, fps)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 每 1s 一个关键帧，便于快速恢复
-                    setInteger(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000) // 编码器停帧仍出重复帧(100ms)
+                    // 低延迟：关键帧频率高一点，UDP 丢包恢复快
+                    setInteger(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000)
                     setInteger(
                         MediaFormat.KEY_PROFILE,
                         MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline
