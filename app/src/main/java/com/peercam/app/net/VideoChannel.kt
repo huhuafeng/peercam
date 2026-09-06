@@ -192,15 +192,27 @@ class VideoChannel(private val logTag: String = "PeerCam/Ch") {
 
     // ---- 分片重组 ----
     private val fragBuf = HashMap<Long, HashMap<Int, ByteArray>>()
-    private val fragMeta = HashMap<Long, IntArray>() // frameId -> [count, tsLow]
+    private val fragMeta = HashMap<Long, IntArray>() // frameId -> [count, receivedAtMs]
+    private val FRAG_TTL_MS = 2_000L
 
     private fun reassemble(h: Protocol.Header, data: ByteArray): ByteArray? {
         synchronized(fragBuf) {
+            val now = System.currentTimeMillis()
+            // 过期清理：单帧超过 2s 未完成则丢弃（无线内存增长）
+            val it = fragMeta.entries.iterator()
+            while (it.hasNext()) {
+                val e = it.next()
+                if (now - e.value[1] > FRAG_TTL_MS) {
+                    it.remove()
+                    fragBuf.remove(e.key)
+                }
+            }
+
             val frameId = h.frameId
             val map = fragBuf.getOrPut(frameId) { HashMap() }
             val pay = Protocol.payload(data, h)
             map[h.fragIndex] = pay
-            val metas = fragMeta.getOrPut(frameId) { intArrayOf(h.fragCount, h.timestampMs.toInt()) }
+            val metas = fragMeta.getOrPut(frameId) { intArrayOf(h.fragCount, now.toInt()) }
             if (map.size < metas[0]) return null
             val total = map.values.sumOf { it.size }
             val out = ByteArray(total)

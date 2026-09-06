@@ -26,7 +26,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 数据通路（本端 → 对端）：
  *   Camera2 → Encoder(输入 Surface) → Annex-B → VideoChannel.sendFrame → UDP 1200B 分片 → 对端重组 → Decoder → Surface
  *
- * 状态通过 [PeerState] 单例通知 UI。
+ * 关键设计：Service 创建即打开 UDP 接收端口并开始 receiveLoop（被动接收），
+ * 点击"连接"只启动发送侧（相机+编码+定向）——这样一端主动连、另一端无需任何操作即可看到画面。
  */
 class PeerService : Service() {
     private val log = "PeerService"
@@ -41,6 +42,8 @@ class PeerService : Service() {
     private var remoteIp = ""
     private var frameCounter = 0L
     private var lastRxAt = 0L
+    private var pendingCsd: Triple<Int, Int, ByteArray>? = null
+    private var viewSurface: Surface? = null // UI 最近一次 attach 的 Surface
     private val isConnected = AtomicBoolean(false)
     private val isStopping = AtomicBoolean(false)
 
@@ -106,9 +109,50 @@ class PeerService : Service() {
         handlerThread = HandlerThread("pcam-service").also { it.start() }
         handler = Handler(handlerThread!!.looper)
         startForegroundCompat()
+        // 打开通道并启动接收（保证被对方主动连接时能收到视频）
+        openChannelAndListen()
     }
 
-    /** 启动完整会话（相机 + 编码 + UDP 收发 + 心跳）。 */
+    /** 打开 UDP 端口并启动接收循环（只做被动接收，不启动相机/编码）。 */
+    private fun openChannelAndListen() {
+        if (channel != null) return
+        try {
+            val ch = VideoChannel()
+            ch.open()
+            this.channel = ch
+            val chRef = ch
+            rxThread = Thread({
+                chRef.receiveLoop(
+                    onConfig = { w, h, csd ->
+                        handler?.post {
+                            pendingCsd = Triple(w, h, csd)
+                            decoder?.configure(w, h, csd)
+                        }
+                    },
+                    onFrame = { _, data, isKey, _ ->
+                        lastRxAt = System.currentTimeMillis()
+                        handler?.post { decoder?.feed(data, isKey) }
+                    },
+                    onControl = { type, from, _ ->
+                        when (type) {
+                            // 对方请求配置：重发 CSD + 关键帧
+                            Protocol.TYPE_CONN -> {
+                                handler?.post {
+                                    if (from.isNotEmpty()) channel?.setRemote(from)
+                                    encoder?.resendConfig()
+                                    encoder?.requestKeyFrame()
+                                }
+                            }
+                        }
+                    }
+                )
+            }, "pcam-rx").apply { start() }
+        } catch (e: Exception) {
+            Log.e(log, "open channel failed: ${e.message}", e)
+        }
+    }
+
+    /** 启动完整会话（发送侧：相机 + 编码 + 定向对端）。 */
     private fun startAll(ip: String) {
         if (isConnected.get() || isStopping.get()) return
         remoteIp = ip
@@ -117,10 +161,13 @@ class PeerService : Service() {
         Log.i(log, "startAll -> $ip")
         PeerState.notifyStatus("连接中 $ip…", true)
 
-        val channel = VideoChannel()
-        channel.open()
-        channel.setRemote(ip)
-        this.channel = channel
+        // 通道必须已打开（onCreate 已保证）；设置目标
+        val ch = channel
+        if (ch == null) {
+            PeerState.notifyStatus("网络通道初始化失败", false)
+            return
+        }
+        ch.setRemote(ip)
 
         // ---- 编码器 ----
         val enc = Encoder(
@@ -128,51 +175,22 @@ class PeerService : Service() {
                 this.channel?.sendConfig(640, 480, csd)
             },
             onFrame = { data, isKey, ts ->
-                val ch = this.channel
-                if (ch != null) {
+                val c = this.channel
+                if (c != null) {
                     frameCounter++
-                    ch.sendFrame(frameCounter, data, isKey, ts)
+                    c.sendFrame(frameCounter, data, isKey, ts)
                 }
             }
         )
         enc.start(640, 480, 1_200_000, 15)
         this.encoder = enc
 
-        // ---- 接收循环 ----
-        val ch = channel
-        rxThread = Thread({
-            ch.receiveLoop(
-                onConfig = { w, h, csd ->
-                    handler?.post { decoder?.configure(w, h, csd) }
-                },
-                onFrame = { _, data, isKey, _ ->
-                    lastRxAt = System.currentTimeMillis()
-                    handler?.post { decoder?.feed(data, isKey) }
-                },
-                onControl = { type, _, _ ->
-                    when (type) {
-                        // 对方刚连上或刚重建解码器：请它立刻发关键帧
-                        Protocol.TYPE_CONN -> {
-                            handler?.post { encoder?.requestKeyFrame() }
-                        }
-                    }
-                }
-            )
-        }, "pcam-rx").apply { start() }
-
-        // ---- 心跳 ----
-        handler?.postDelayed(object : Runnable {
-            override fun run() {
-                if (isConnected.get() && !isStopping.get()) {
-                    channel.sendPing()
-                    if (System.currentTimeMillis() - lastRxAt > 10_000) {
-                        Log.w(log, "peer silent >10s")
-                        PeerState.notifyStatus("对方无响应（可能已退出 App）", false)
-                    }
-                    handler?.postDelayed(this, 2_000)
-                }
-            }
-        }, 2_000)
+        // 重建解码器（重连场景：viewSurface 仍在但 decoder 已被 teardown 清空）
+        val vs = viewSurface
+        if (decoder == null && vs != null) {
+            decoder = Decoder(vs)
+            pendingCsd?.let { (w, h, csd) -> decoder?.configure(w, h, csd) }
+        }
 
         // ---- 相机 → 编码器 ----
         val cam = CameraSource(this) { ok ->
@@ -193,6 +211,7 @@ class PeerService : Service() {
     /** 对端画面输出 Surface 变化（重建解码器）。 */
     private fun attachSurface(surface: Surface?) {
         handler?.post {
+            viewSurface = surface
             if (surface == null) {
                 decoder?.stop()
                 decoder = null
@@ -200,11 +219,16 @@ class PeerService : Service() {
             }
             decoder?.stop()
             decoder = Decoder(surface)
+            // 若已有缓存的 config，立即喂给新解码器
+            pendingCsd?.let { (w, h, csd) ->
+                decoder?.configure(w, h, csd)
+            }
             // 主动请求对端发配置 + 关键帧
             val ch = channel
             val ip = remoteIp
             if (ch != null && ip.isNotEmpty()) {
                 ch.sendControl(ip, Protocol.TYPE_CONN)
+                encoder?.resendConfig()   // 同时把我们的 CSD 发给对端（对端刚重建解码器）
                 encoder?.requestKeyFrame()
             }
         }

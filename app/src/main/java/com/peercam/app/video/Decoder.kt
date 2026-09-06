@@ -25,10 +25,11 @@ class Decoder(private val surface: Surface) {
     /**
      * 用 config 初始化解码器。
      * 传 null 表示清空（等待下一个 config）。
+     * 同尺寸重复 config 时强制重建（编码器重启后 SPS/PPS 可能变化）。
      */
     fun configure(widthParam: Int, heightParam: Int, csd: ByteArray) {
         synchronized(lock) {
-            if (codec != null && width == widthParam && height == heightParam) return
+            // 不短路：总是重建（编码器重启/参数变化需要新 CSD）
             releaseLocked()
             try {
                 val nalu = H264Util.splitNalus(csd)

@@ -49,6 +49,8 @@ class Discovery(
             socket = sock
         } catch (e: Exception) {
             running = false
+            try { lock?.release() } catch (_: Exception) {}
+            lock = null
             return
         }
 

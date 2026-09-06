@@ -53,6 +53,12 @@ class CameraSource(
         val id = pickCamera(manager!!, facingBack)
         if (id == null) {
             Log.e(log, "no camera for facing=$facingBack")
+            synchronized(lock) {
+                started = false
+                try { handlerThread?.quitSafely() } catch (_: Exception) {}
+                handlerThread = null
+                handler = null
+            }
             onState(false)
             return
         }
@@ -60,6 +66,12 @@ class CameraSource(
             manager!!.openCamera(id, this, handler)
         } catch (e: Exception) {
             Log.e(log, "openCamera failed: ${e.message}", e)
+            synchronized(lock) {
+                started = false
+                try { handlerThread?.quitSafely() } catch (_: Exception) {}
+                handlerThread = null
+                handler = null
+            }
             onState(false)
         }
     }

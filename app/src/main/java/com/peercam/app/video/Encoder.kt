@@ -80,7 +80,9 @@ class Encoder(
                             outBuf.get(arr)
 
                             if (isCfg && arr.size > 0) {
-                                onConfig(H264Util.avccToAnnexB(arr))
+                                val csd = H264Util.avccToAnnexB(arr)
+                                latestCsd = csd
+                                onConfig(csd)
                             } else if (info.size > 0) {
                                 val annexB =
                                     if (H264Util.isAnnexB(arr)) arr else H264Util.avccToAnnexB(arr)
@@ -100,6 +102,7 @@ class Encoder(
                     override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
                         val csd = H264Util.formatCsdToAnnexB(format)
                         if (csd != null) {
+                            latestCsd = csd
                             try { onConfig(csd) } catch (_: Exception) {}
                         }
                     }
@@ -113,6 +116,15 @@ class Encoder(
                 releaseLocked()
             }
         }
+    }
+
+    /** 最近一次编码器输出的 CSD（SPS/PPS Annex-B），可重复发送。 */
+    private var latestCsd: ByteArray? = null
+
+    /** 重发参数集给对端（解决解码器重建后无 CSD 导致黑屏）。 */
+    fun resendConfig() {
+        val c = latestCsd ?: return
+        try { onConfig(c) } catch (_: Exception) {}
     }
 
     fun requestKeyFrame() {

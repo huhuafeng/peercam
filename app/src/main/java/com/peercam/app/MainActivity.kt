@@ -122,12 +122,23 @@ class MainActivity : AppCompatActivity(), PeerState.Listener {
         if (discovery != null) return
         discovery = Discovery(this) { ip, name ->
             runOnUiThread {
-                binding.tvFound.text = "发现: $name  $ip"
-                if (!PeerState.connected) {
-                    connectTo(ip)
-                }
+                binding.tvFound.text = "发现: $name  $ip  （点击连接）"
+                binding.tvFound.setOnClickListener { connectTo(ip) }
             }
         }.also { it.start() }
+    }
+
+    /** 若 TextureView surface 已可用，重新 attach（Activity 重启/Service 重启场景）。 */
+    private fun reattachSurfaceIfAvailable() {
+        if (binding.textureRemote.isAvailable && remoteSurface == null) {
+            val st = binding.textureRemote.surfaceTexture ?: return
+            remoteSurface = Surface(st)
+            PeerService.pendingSurface = remoteSurface
+            startService(
+                Intent(this, PeerService::class.java)
+                    .setAction(PeerService.ACTION_ATTACH_SURFACE)
+            )
+        }
     }
 
     private fun connectTo(ip: String) {
@@ -146,6 +157,8 @@ class MainActivity : AppCompatActivity(), PeerState.Listener {
         super.onStart()
         PeerState.addListener(this)
         requestPermissionsIfNeeded()
+        // 重新绑定 surface（Activity 重启/Service 重启后 surface 已存在但 Service 未收到 attach）
+        reattachSurfaceIfAvailable()
     }
 
     override fun onStop() {

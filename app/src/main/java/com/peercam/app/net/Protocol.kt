@@ -81,7 +81,8 @@ object Protocol {
         h.flags = buf.short.toInt() and 0xFFFF
         h.timestampMs = buf.long
         h.payloadLen = buf.int
-        if (data.size < HEADER_SIZE + h.payloadLen) return null
+        // 校验 payload 长度：防恶意/损坏包（payloadLen 非法导致 copyOfRange 崩溃）
+        if (h.payloadLen < 0 || data.size < HEADER_SIZE + h.payloadLen) return null
         return h
     }
 
