@@ -140,7 +140,11 @@ class PeerService : Service() {
                             startStreamingIfNeeded(from = fromIp)
                             // 解码器可能还没创建（surface attach 时序问题）：用 viewSurface 延迟创建
                             ensureDecoder()
-                            decoder?.configure(w, h, csd)
+                            // 用 SPS 解析的真实尺寸配置解码器（config 头尺寸可能不准）
+                            val real = com.peercam.app.video.H264Util.parseCsd(csd)
+                            val rw = real?.first ?: w
+                            val rh = real?.second ?: h
+                            decoder?.configure(rw, rh, csd)
                         }
                     },
                     onFrame = { _, data, isKey, _, fromIp ->
@@ -210,8 +214,10 @@ class PeerService : Service() {
 
         // ---- 编码器 ----
         val enc = Encoder(
-            onConfig = { csd ->
-                this.channel?.sendConfig(640, 480, csd)
+            onConfig = { w, h, csd ->
+                // 用真实输出尺寸发 config（SPS 内尺寸 vs config 头尺寸必须一致！）
+                this.channel?.sendConfig(w, h, csd)
+                Log.i(log, "sendConfig ${w}x$h csd=${csd.size}B")
             },
             onFrame = { data, isKey, ts ->
                 val c = this.channel

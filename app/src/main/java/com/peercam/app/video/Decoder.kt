@@ -40,6 +40,9 @@ class Decoder(private val surface: Surface) {
                 val format = MediaFormat.createVideoFormat(
                     MediaFormat.MIMETYPE_VIDEO_AVC, widthParam, heightParam
                 )
+                // 注意：某些厂商要求 csd 为「裸 NAL 不带 start code」（官方标准），
+                // 这里 splitNalus 后塞入裸 NAL；若部分设备不认，可改为塞 Annex-B。
+                // 兼容起见：塞入裸 NAL（标准做法）
                 format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 1024 * 1024)
                 format.setByteBuffer("csd-0", ByteBuffer.wrap(nalu[0]))
                 format.setByteBuffer("csd-1", ByteBuffer.wrap(nalu[1]))

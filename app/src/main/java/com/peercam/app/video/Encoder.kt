@@ -11,11 +11,11 @@ import android.view.Surface
  * H.264 编码器：相机 Surface 输入 → Annex-B 输出回调。
  *
  *  - 内部创建输入 Surface（[encoderSurface]），Camera2 直接把帧送进来
- *  - 参数集（SPS/PPS）变化时回调 [onConfig]
+ *  - 参数集（SPS/PPS）变化时回调 [onConfig]（含解析出的真实宽高）
  *  - 编码帧回调 [onFrame]，已统一为 Annex-B 格式
  */
 class Encoder(
-    private val onConfig: (csd: ByteArray) -> Unit,
+    private val onConfig: (width: Int, height: Int, csd: ByteArray) -> Unit,
     private val onFrame: (data: ByteArray, isKeyFrame: Boolean, ts: Long) -> Unit
 ) {
     private val log = "PeerCam/Enc"
@@ -47,7 +47,7 @@ class Encoder(
                     setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
                     setInteger(MediaFormat.KEY_FRAME_RATE, fps)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 每 1s 一个关键帧，便于快速恢复
-                    setInteger(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 10_000)
+                    setInteger(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000) // 编码器停帧仍出重复帧(100ms)
                     setInteger(
                         MediaFormat.KEY_PROFILE,
                         MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline
@@ -82,11 +82,14 @@ class Encoder(
                             if (isCfg && arr.size > 0) {
                                 val csd = H264Util.avccToAnnexB(arr)
                                 latestCsd = csd
-                                onConfig(csd)
-                                Log.i(log, "encoder config sent (${csd.size}B)")
+                                val parsed = H264Util.parseCsd(csd)
+                                val w = parsed?.first ?: width
+                                val h = parsed?.second ?: height
+                                onConfig(w, h, csd)
+                                Log.i(log, "encoder config sent (${csd.size}B ${w}x$h)")
                             } else if (info.size > 0) {
-                                val annexB =
-                                    if (H264Util.isAnnexB(arr)) arr else H264Util.avccToAnnexB(arr)
+                                // avccToAnnexB 内部：Annex-B 直通；AVCC 严格转换；失败回退原始
+                                val annexB = H264Util.avccToAnnexB(arr)
                                 onFrame(annexB, isKey, info.presentationTimeUs / 1000)
                             }
                         } catch (e: Exception) {
@@ -104,7 +107,12 @@ class Encoder(
                         val csd = H264Util.formatCsdToAnnexB(format)
                         if (csd != null) {
                             latestCsd = csd
-                            try { onConfig(csd) } catch (_: Exception) {}
+                            // 从 SPS 解析真实输出尺寸（Surface 输入时编码器实际尺寸）
+                            val parsed = H264Util.parseCsd(csd)
+                            val w = parsed?.first ?: format.getInteger(MediaFormat.KEY_WIDTH)
+                            val h = parsed?.second ?: format.getInteger(MediaFormat.KEY_HEIGHT)
+                            Log.i(log, "encoder real output: ${w}x$h")
+                            try { onConfig(w, h, csd) } catch (_: Exception) {}
                         }
                     }
                 })
@@ -125,7 +133,10 @@ class Encoder(
     /** 重发参数集给对端（解决解码器重建后无 CSD 导致黑屏）。 */
     fun resendConfig() {
         val c = latestCsd ?: return
-        try { onConfig(c) } catch (_: Exception) {}
+        val parsed = H264Util.parseCsd(c)
+        val w = parsed?.first ?: width
+        val h = parsed?.second ?: height
+        try { onConfig(w, h, c) } catch (_: Exception) {}
     }
 
     fun requestKeyFrame() {
